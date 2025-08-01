@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAPTCHA Test Website</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .captcha-container {
+            margin: 20px 0;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .captcha-image {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            color: white;
+            padding: 10px 20px;
+            font-size: 24px;
+            font-weight: bold;
+            letter-spacing: 3px;
+            text-align: center;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            font-family: 'Courier New', monospace;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        input[type="text"], input[type="email"] {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 CAPTCHA Test Website</h1>
+        <p>Ye website CAPTCHA functionality test karne ke liye hai.</p>
+        
+        <form id="testForm">
+            <label for="email">Email Address:</label>
+            <input type="email" id="email" name="email" required>
+            
+            <div class="captcha-container">
+                <label for="captcha">CAPTCHA Code:</label>
+                <div class="captcha-image" id="captchaDisplay">ABC123</div>
+                <input type="text" id="captcha" name="captcha" placeholder="Enter CAPTCHA code" required>
+                <button type="button" onclick="refreshCaptcha()">🔄 Refresh CAPTCHA</button>
+            </div>
+            
+            <button type="submit">Submit Form</button>
+        </form>
+        
+        <div id="result"></div>
+        
+        <!-- reCAPTCHA Test Section -->
+        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
+            <h3>reCAPTCHA Test</h3>
+            <p>Neeche reCAPTCHA simulate kiya gaya hai:</p>
+            <div style="border: 1px solid #ddd; padding: 10px; background: #f9f9f9;">
+                <iframe src="about:blank" style="width: 300px; height: 78px; border: none;" 
+                        title="reCAPTCHA simulation" data-src="recaptcha"></iframe>
+                <p style="font-size: 12px; color: #666;">
+                    ☝️ Ye reCAPTCHA simulation hai - real reCAPTCHA nahi hai
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const captchaCodes = ['ABC123', 'XYZ789', 'DEF456', 'GHI012', 'JKL345', 'MNO678', 'PQR901'];
+        let currentCaptcha = 'ABC123';
+
+        function refreshCaptcha() {
+            currentCaptcha = captchaCodes[Math.floor(Math.random() * captchaCodes.length)];
+            document.getElementById('captchaDisplay').textContent = currentCaptcha;
+            document.getElementById('captcha').value = '';
+            document.getElementById('result').innerHTML = '';
+        }
+
+        document.getElementById('testForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const email = document.getElementById('email').value;
+            const captchaInput = document.getElementById('captcha').value;
+            const resultDiv = document.getElementById('result');
+            
+            if (captchaInput.toUpperCase() === currentCaptcha) {
+                resultDiv.innerHTML = '<div class="success">✅ CAPTCHA correct! Form submitted successfully.</div>';
+                setTimeout(() => {
+                    refreshCaptcha();
+                    document.getElementById('email').value = '';
+                }, 2000);
+            } else {
+                resultDiv.innerHTML = '<div class="error">❌ CAPTCHA incorrect! Please try again.</div>';
+                refreshCaptcha();
+            }
+        });
+
+        // Initialize
+        refreshCaptcha();
+    </script>
+</body>
+</html>

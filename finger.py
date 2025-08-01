@@ -6,11 +6,23 @@ import uuid
 from playwright.sync_api import sync_playwright
 import time
 from datetime import datetime, timedelta
+import base64
+import io
+from PIL import Image
+import pytesseract  # For OCR-based CAPTCHA solving
 
 class AdvancedFingerprinter:
     def __init__(self):
         self.device_profiles = self._load_device_profiles()
         self.browser_versions = self._get_latest_browser_versions()
+
+        # CAPTCHA solving configuration
+        self.captcha_config = {
+            'max_attempts': 3,
+            'wait_time': 5,
+            'ocr_enabled': True,
+            'manual_fallback': True
+        }
 
     def _load_device_profiles(self):
         """Different device profiles load karte hain"""
@@ -822,7 +834,270 @@ class AdvancedFingerprinter:
             'generated_at': datetime.now().isoformat()
         }
 
-def run_advanced_browser(device_type='random', browser_type='chrome', show_details=True):
+    def solve_captcha(self, page, captcha_type='image'):
+        """
+        CAPTCHA solve karne ka attempt karta hai
+        :param page: Playwright page object
+        :param captcha_type: 'image', 'text', or 'recaptcha'
+        :return: True if CAPTCHA solved, False otherwise
+        """
+        attempts = 0
+        solved = False
+
+        while attempts < self.captcha_config['max_attempts'] and not solved:
+            attempts += 1
+            print(f"🔄 CAPTCHA solve karne ka attempt {attempts}/{self.captcha_config['max_attempts']}")
+
+            try:
+                if captcha_type == 'image':
+                    # Image CAPTCHA handling
+                    captcha_element = page.query_selector('img[src*="captcha"], img[alt*="CAPTCHA"], img[alt*="captcha"], img[id*="captcha"], img[class*="captcha"]')
+                    if captcha_element:
+                        # Get the CAPTCHA image
+                        captcha_src = captcha_element.get_attribute('src')
+
+                        if captcha_src and captcha_src.startswith('data:image'):
+                            # Handle base64 encoded image
+                            image_data = captcha_src.split(',')[1]
+                            image = Image.open(io.BytesIO(base64.b64decode(image_data)))
+                        elif captcha_src:
+                            # Handle URL-based image (would require download)
+                            print("⚠️ URL-based CAPTCHA images require additional handling")
+                            if self.captcha_config['manual_fallback']:
+                                print("ℹ️ Manual CAPTCHA solving required - browser open hai")
+                                input("👉 CAPTCHA solve karke Enter dabayein...")
+                                return True
+                            return False
+                        else:
+                            print("❌ CAPTCHA image source nahi mila")
+                            continue
+
+                        if self.captcha_config['ocr_enabled']:
+                            try:
+                                # Use OCR to solve CAPTCHA
+                                captcha_text = pytesseract.image_to_string(image, config='--psm 8 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz').strip()
+                                if captcha_text:
+                                    # Find the input field and enter the text
+                                    captcha_input = page.query_selector('input[name*="captcha"], input[id*="captcha"], input[placeholder*="captcha"], input[class*="captcha"]')
+                                    if captcha_input:
+                                        captcha_input.fill(captcha_text)
+                                        print(f"📝 OCR se CAPTCHA solution: {captcha_text}")
+
+                                        # Find and click submit button
+                                        submit_button = page.query_selector('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Verify")')
+                                        if submit_button:
+                                            submit_button.click()
+                                            page.wait_for_timeout(2000)  # Wait for possible page change
+
+                                            # Check if CAPTCHA was successful
+                                            if not page.query_selector('img[src*="captcha"], img[alt*="CAPTCHA"]'):
+                                                solved = True
+                                                print("✅ CAPTCHA successfully solve ho gaya!")
+                                        else:
+                                            print("⚠️ Submit button nahi mila")
+                                    else:
+                                        print("⚠️ CAPTCHA input field nahi mila")
+                                else:
+                                    print("⚠️ OCR se text extract nahi hua")
+                            except Exception as e:
+                                print(f"❌ OCR error: {str(e)}")
+
+                elif captcha_type == 'recaptcha':
+                    # reCAPTCHA handling
+                    recaptcha_frame = page.query_selector('iframe[src*="recaptcha"]')
+                    if recaptcha_frame:
+                        print("🔍 reCAPTCHA detect hua hai")
+
+                        if self.captcha_config['manual_fallback']:
+                            print("ℹ️ Manual reCAPTCHA solving required - browser open hai")
+                            input("👉 reCAPTCHA solve karke Enter dabayein...")
+                            return True
+
+                # Wait before next attempt
+                if not solved:
+                    page.wait_for_timeout(self.captcha_config['wait_time'] * 1000)
+
+            except Exception as e:
+                print(f"❌ CAPTCHA solve karne mein error: {str(e)}")
+                page.wait_for_timeout(self.captcha_config['wait_time'] * 1000)
+
+        return solved
+
+    def handle_captcha_challenge(self, page):
+        """
+        Various types ke CAPTCHA challenges handle karta hai
+        :param page: Playwright page object
+        :return: True if CAPTCHA handled, False otherwise
+        """
+        # Check for different types of CAPTCHAs
+        captcha_detected = False
+
+        print("🔍 Page par CAPTCHA check kar rahe hain...")
+
+        # 1. Image CAPTCHA
+        captcha_img = page.query_selector('img[src*="captcha"], img[alt*="CAPTCHA"], img[alt*="captcha"], img[id*="captcha"], img[class*="captcha"]')
+        if captcha_img:
+            print("📷 Image CAPTCHA detect hua hai")
+            return self.solve_captcha(page, 'image')
+
+        # 2. reCAPTCHA
+        recaptcha = page.query_selector('iframe[src*="recaptcha"], .g-recaptcha, [data-sitekey]')
+        if recaptcha:
+            print("🛡️ reCAPTCHA detect hua hai")
+            return self.solve_captcha(page, 'recaptcha')
+
+        # 3. Text-based CAPTCHA
+        captcha_input = page.query_selector('input[name*="captcha"], input[id*="captcha"], input[placeholder*="captcha"], input[class*="captcha"]')
+        if captcha_input:
+            print("🔤 Text CAPTCHA detect hua hai")
+            if self.captcha_config['manual_fallback']:
+                print("ℹ️ Manual CAPTCHA solving required - browser open hai")
+                input("👉 CAPTCHA solve karke Enter dabayein...")
+                return True
+
+        # 4. hCaptcha
+        hcaptcha = page.query_selector('iframe[src*="hcaptcha"], .h-captcha, [data-hcaptcha-sitekey]')
+        if hcaptcha:
+            print("🔒 hCaptcha detect hua hai")
+            if self.captcha_config['manual_fallback']:
+                print("ℹ️ Manual hCaptcha solving required - browser open hai")
+                input("👉 hCaptcha solve karke Enter dabayein...")
+                return True
+
+        # 5. Cloudflare CAPTCHA
+        cloudflare = page.query_selector('[data-ray], .cf-browser-verification, .cf-challenge-running, .cf-im-under-attack')
+        if cloudflare:
+            print("☁️ Cloudflare CAPTCHA detect hua hai")
+            if self.captcha_config['manual_fallback']:
+                print("ℹ️ Manual Cloudflare CAPTCHA solving required - browser open hai")
+                input("👉 Cloudflare CAPTCHA solve karke Enter dabayein...")
+                return True
+
+        # 6. Generic CAPTCHA detection
+        generic_captcha = page.query_selector('[class*="captcha"], [id*="captcha"], [name*="captcha"]')
+        if generic_captcha:
+            print("🎯 Generic CAPTCHA element detect hua hai")
+            print(f"Element: {generic_captcha.get_attribute('outerHTML')[:100]}...")
+            if self.captcha_config['manual_fallback']:
+                print("ℹ️ Manual CAPTCHA solving required - browser open hai")
+                input("👉 CAPTCHA solve karke Enter dabayein...")
+                return True
+
+        print("✅ Koi CAPTCHA detect nahi hua - page clear hai")
+        return False
+
+    def handle_auth0_redirects(self, page, target_url):
+        """
+        Handle Auth0 authentication redirects
+        """
+        print("🔐 Auth0 login page detect hua hai")
+
+        # Wait for Auth0 page to fully load
+        try:
+            page.wait_for_selector('input[type="email"], input[name="username"], input[id="username"]', timeout=10000)
+            print("✅ Auth0 login form load ho gaya")
+
+            # Check if we're on the correct login page
+            current_url = page.url
+            if "login.augmentcode.com" in current_url or "auth0.com" in current_url:
+                print(f"🎯 Auth0 login page: {current_url}")
+                return True
+            else:
+                print(f"⚠️ Unexpected redirect: {current_url}")
+                return False
+
+        except Exception as e:
+            print(f"⚠️ Auth0 page load issue: {str(e)}")
+            return False
+
+    def navigate_with_captcha_handling(self, page, url, max_retries=3):
+        """
+        Page navigation with CAPTCHA handling and Auth0 support
+        """
+        retries = 0
+
+        # Check if this is an Auth0 login URL
+        is_auth0_url = "login.augmentcode.com" in url or "auth0.com" in url
+
+        while retries < max_retries:
+            try:
+                print(f"🌐 {url} par navigate kar rahe hain...")
+
+                # Special handling for Auth0 URLs
+                if is_auth0_url:
+                    # For Auth0, use wait_until: 'domcontentloaded' instead of 'load'
+                    page.goto(url, wait_until='domcontentloaded', timeout=30000)
+
+                    # Wait for Auth0 specific elements
+                    try:
+                        page.wait_for_selector('body', timeout=10000)
+                        print("✅ Auth0 page body load ho gaya")
+
+                        # Check if we got redirected to home page
+                        current_url = page.url
+                        if "login.augmentcode.com" not in current_url and "auth0.com" not in current_url:
+                            if "augmentcode.com" in current_url:
+                                print("⚠️ Auth0 redirect ho gaya home page par")
+                                print(f"🔗 Current URL: {current_url}")
+                                print("💡 Manually login page par jane ke liye browser use kariye")
+                            else:
+                                print(f"🔗 Redirected to: {current_url}")
+                        else:
+                            print("✅ Auth0 login page successfully load ho gaya")
+
+                    except Exception as auth_error:
+                        print(f"⚠️ Auth0 loading issue: {str(auth_error)}")
+
+                else:
+                    # Regular navigation for non-Auth0 URLs
+                    page.goto(url, timeout=30000)
+
+                    # Try different wait strategies
+                    try:
+                        # First try networkidle with shorter timeout
+                        page.wait_for_load_state('networkidle', timeout=5000)
+                        print("✅ Page networkidle state mein load ho gaya")
+                    except:
+                        try:
+                            # If networkidle fails, try domcontentloaded
+                            page.wait_for_load_state('domcontentloaded', timeout=5000)
+                            print("✅ Page DOM content load ho gaya")
+                        except:
+                            # If both fail, just wait for basic load
+                            page.wait_for_load_state('load', timeout=5000)
+                            print("✅ Page basic load ho gaya")
+
+                # Check for CAPTCHA immediately after navigation
+                if self.handle_captcha_challenge(page):
+                    print("✅ CAPTCHA solve karne ke baad page load ho gaya")
+                    return True
+
+                # Check if page loaded successfully
+                if page.url and not page.url.startswith('about:blank'):
+                    print("✅ Page successfully load ho gaya")
+                    return True
+
+            except Exception as e:
+                retries += 1
+                print(f"❌ Navigation error (Attempt {retries}/{max_retries}): {str(e)}")
+                if retries < max_retries:
+                    print(f"⏳ {self.captcha_config['wait_time']} seconds wait kar rahe hain...")
+                    page.wait_for_timeout(self.captcha_config['wait_time'] * 1000)  # Wait before retry
+
+        # Even if navigation "failed", check if page is actually accessible
+        try:
+            if page.url and not page.url.startswith('about:blank'):
+                print("⚠️ Navigation timeout hua lekin page accessible hai")
+                # Still check for CAPTCHA
+                self.handle_captcha_challenge(page)
+                return True
+        except:
+            pass
+
+        print("❌ Maximum retries reach ho gaye, navigation fail ho gaya")
+        return False
+
+def run_advanced_browser(device_type='random', browser_type='chrome', show_details=True, target_url=None):
     """Advanced browser fingerprinting ke saath browser run karte hain"""
     fingerprinter = AdvancedFingerprinter()
 
@@ -830,7 +1105,7 @@ def run_advanced_browser(device_type='random', browser_type='chrome', show_detai
     fingerprint = fingerprinter.generate_complete_fingerprint(device_type, browser_type)
 
     with sync_playwright() as p:
-        # Browser launch arguments
+        # Browser launch arguments - Enhanced for Auth0 and login pages
         launch_args = [
             f'--user-agent={fingerprint["user_agent"]}',
             f'--window-size={fingerprint["device"]["resolution"]["width"]},{fingerprint["device"]["resolution"]["height"]}',
@@ -848,7 +1123,12 @@ def run_advanced_browser(device_type='random', browser_type='chrome', show_detai
             '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding',
             '--disable-features=TranslateUI',
-            '--disable-ipc-flooding-protection'
+            '--disable-ipc-flooding-protection',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-default-apps',
+            '--disable-sync',
+            '--no-first-run',
+            '--disable-component-update'
         ]
 
         # Browser launch karte hain
@@ -857,7 +1137,7 @@ def run_advanced_browser(device_type='random', browser_type='chrome', show_detai
             args=launch_args
         )
 
-        # Context create karte hain with advanced settings
+        # Context create karte hain with advanced settings for Auth0 compatibility
         context = browser.new_context(
             user_agent=fingerprint["user_agent"],
             viewport={
@@ -866,16 +1146,24 @@ def run_advanced_browser(device_type='random', browser_type='chrome', show_detai
             },
             locale=fingerprint["language"]["primary"],
             timezone_id=fingerprint["timezone"]["id"],
-            permissions=[],
+            permissions=['geolocation', 'notifications'],
             color_scheme=random.choice(['light', 'dark']),
             device_scale_factor=fingerprint["device"]["resolution"]["ratio"],
             extra_http_headers={
                 'Accept-Language': fingerprint["language"]["accept"],
                 'Accept-Encoding': 'gzip, deflate, br',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
-            }
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                'Cache-Control': 'max-age=0',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-User': '?1',
+                'Sec-Fetch-Dest': 'document',
+                'Upgrade-Insecure-Requests': '1'
+            },
+            # Enable JavaScript and cookies for Auth0
+            java_script_enabled=True,
+            accept_downloads=True,
+            ignore_https_errors=True
         )
 
         # Page create karte hain
@@ -926,18 +1214,38 @@ def run_advanced_browser(device_type='random', browser_type='chrome', show_detai
         """)
 
         try:
-            print("🚀 Augment website par ja rahe hain...")
-            page.goto('https://www.augmentcode.com/', timeout=30000)
-            page.wait_for_selector('body', timeout=15000)
+            target_url = target_url or 'https://www.augmentcode.com/'
+            print(f"🚀 {target_url} website par ja rahe hain...")
 
-            if "augment" not in page.title().lower():
-                print("⚠️  Warning: Augment website properly load nahi hui ho sakti")
-            else:
-                print("✅ Augment website successfully load ho gayi!")
+            navigation_success = fingerprinter.navigate_with_captcha_handling(page, target_url)
+
+            if not navigation_success:
+                print("⚠️ Navigation timeout hua, lekin browser manually use kar sakte hain")
+
+            # Always check for CAPTCHA regardless of navigation status
+            fingerprinter.handle_captcha_challenge(page)
+
+            # Try to get page info
+            try:
+                page_title = page.title()
+                current_url = page.url
+                print(f"📄 Current page: {page_title}")
+                print(f"🔗 Current URL: {current_url}")
+
+                if target_url == 'https://www.augmentcode.com/' and "augment" in page_title.lower():
+                    print("✅ Augment website successfully load ho gayi!")
+                elif current_url and not current_url.startswith('about:blank'):
+                    print("✅ Website accessible hai!")
+                else:
+                    print("⚠️ Website status unclear, manually check kariye")
+
+            except Exception as page_error:
+                print(f"⚠️ Page info get nahi kar paye: {str(page_error)}")
+                print("💡 Browser manually use kar sakte hain")
 
         except Exception as e:
             print(f"❌ Error: {str(e)}")
-            print("💡 Aap manually browser use kar sakte hain")
+            print("💡 Browser open hai, manually use kar sakte hain")
 
         if show_details:
             print("\n" + "="*60)
@@ -1003,8 +1311,8 @@ def show_device_options():
     print("\n" + "="*50)
 
 if __name__ == "__main__":
-    print("🎭 ADVANCED BROWSER FINGERPRINTING TOOL")
-    print("="*50)
+    print("🎭 ADVANCED BROWSER FINGERPRINTING TOOL WITH CAPTCHA HANDLING")
+    print("="*60)
 
     while True:
         print("\n🎯 Options:")
@@ -1012,9 +1320,10 @@ if __name__ == "__main__":
         print("2. 📱 Specific device type choose karo")
         print("3. 🔄 Multiple browsers launch karo")
         print("4. 📋 Available devices dekho")
-        print("5. ❌ Exit")
+        print("5. 🌐 Custom website test karo")
+        print("6. ❌ Exit")
 
-        choice = input("\n👉 Apna choice enter karo (1-5): ").strip()
+        choice = input("\n👉 Apna choice enter karo (1-6): ").strip()
 
         if choice == '1':
             run_advanced_browser()
@@ -1041,7 +1350,13 @@ if __name__ == "__main__":
         elif choice == '4':
             show_device_options()
         elif choice == '5':
+            target_url = input("👉 Website URL enter karo (e.g., https://example.com): ").strip()
+            if target_url.startswith('http'):
+                run_advanced_browser(target_url=target_url)
+            else:
+                print("❌ Valid URL enter karo (https:// ke saath)")
+        elif choice == '6':
             print("👋 Bye! Happy browsing!")
             break
         else:
-            print("❌ Invalid choice! 1-5 ke beech select karo.")
+            print("❌ Invalid choice! 1-6 ke beech select karo.")
